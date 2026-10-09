@@ -13,7 +13,7 @@ spec:
         - name: ghcr-secret
       containers:
         - name: juice-shop
-          image: ghcr.io/ayoublhg/devsecops-supply-chain/juice-shop:latest
+          image: ghcr.io/ayoublhg/devsecops-supply-chain/juice-shop:main
           ports: [{ containerPort: 3000 }]
           resources:
             requests: { memory: "256Mi", cpu: "250m" }
