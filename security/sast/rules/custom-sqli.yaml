@@ -1,0 +1,40 @@
+rules:
+  - id: custom-sql-injection
+    languages: [javascript, typescript]
+    message: |
+      SQL Injection: user input is concatenated into a SQL query.
+      Use parameterized queries instead.
+    severity: ERROR
+    mode: taint
+    pattern-sources:
+      - pattern: $REQ.query
+      - pattern: $REQ.body
+      - pattern: $REQ.params
+      - pattern: $REQ.headers
+    pattern-sinks:
+      - pattern: $CONN.query(...)
+      - pattern: $CONN.execute(...)
+      - pattern: $DB.query(...)
+      - pattern: $DB.execute(...)
+    pattern-sanitizers:
+      - pattern: parseInt(...)
+      - pattern: Number(...)
+
+  - id: dangerous-eval
+    languages: [javascript, typescript]
+    message: "Use of eval() is dangerous - potential code injection"
+    severity: ERROR
+    pattern: eval(...)
+
+  - id: hardcoded-secret
+    languages: [javascript, typescript]
+    message: "Hardcoded secret detected in source code"
+    severity: ERROR
+    patterns:
+      - pattern-either:
+          - pattern: |
+              const $VAR = "sk_live_..."
+          - pattern: |
+              const $VAR = "AKIA..."
+          - pattern: |
+              $VAR = "wJalrXUtnFEMI..."

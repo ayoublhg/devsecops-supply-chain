@@ -51,6 +51,7 @@ jobs:
       - name: Run Semgrep SAST
         run: |
           semgrep scan \
+            --config=./security/sast/rules/custom-sqli.yaml \
             --config=p/security-audit \
             --config=p/owasp-top-ten \
             --config=p/secrets \
