@@ -1,5 +1,5 @@
 {
-  "name": "vulnerable-test",
+  "name": "sca-test-project",
   "version": "1.0.0",
   "dependencies": {
     "lodash": "4.17.11",
