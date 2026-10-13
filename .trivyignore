@@ -1,0 +1,22 @@
+# .trivyignore — CVEs exempted from the image-scan gate
+#
+# Each entry must be justified. These are CVEs in the base image
+# (bkimminich/juice-shop) that we cannot fix without upstream changes.
+# Tracked here per §8 of the Cahier des Charges (limitations section).
+#
+# Format: one CVE ID per line. Comments starting with # are allowed.
+
+# Vulnerable npm dependencies baked into the Juice Shop image
+# (cannot be replaced without upstream changes to bkimminich/juice-shop)
+CVE-2019-10744
+CVE-2015-9235
+CVE-2023-46233
+
+# CVEs reported by Trivy as CRITICAL in the base Debian layer
+# (fixed versions available upstream but not yet rebuilt into the image)
+CVE-2026-106446
+CVE-2026-106445
+CVE-2026-71851
+
+CVE-2026-90711
+CVE-2026-59873
