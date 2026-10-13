@@ -9,6 +9,7 @@ permissions:
   packages: write
   security-events: write
   actions: read
+  id-token: write
 
 env:
   REGISTRY: ghcr.io
@@ -40,6 +41,17 @@ jobs:
           context: ./app
           push: true
           tags: ${{ steps.meta.outputs.tags }}
+      - name: Generate SBOM with Syft (CycloneDX)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          format: cyclonedx-json
+          output-file: sbom.cyclonedx.json
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.cyclonedx.json
 
   sast-scan:
     runs-on: ubuntu-latest
@@ -85,22 +97,13 @@ jobs:
           output: 'trivy-sca-results.sarif'
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
-      - name: Upload Trivy SARIF
+      - name: Upload Trivy SCA SARIF
         if: always()
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: 'trivy-sca-results.sarif'
           category: trivy-sca
-      - name: Run Trivy SCA (table output for logging)
-        if: failure()
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'table'
-          severity: 'CRITICAL,HIGH'
-          exit-code: '0'
 
   secret-scan:
     runs-on: ubuntu-latest
@@ -113,3 +116,92 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  image-scan:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - name: Run Trivy image scan (Gate 3)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ needs.build-and-push.outputs.image }}@${{ needs.build-and-push.outputs.digest }}
+          format: 'sarif'
+          output: 'trivy-image-results.sarif'
+          severity: 'CRITICAL'
+          exit-code: '1'
+          ignore-unfixed: true
+      - name: Upload Trivy image SARIF
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-image-results.sarif'
+          category: trivy-image
+
+  sign-image:
+    runs-on: ubuntu-latest
+    needs: [build-and-push, sast-scan, sca-scan, secret-scan, image-scan]
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Sign the image (keyless, GitHub OIDC)
+        run: |
+          cosign sign --yes \
+            ${{ needs.build-and-push.outputs.image }}@${{ needs.build-and-push.outputs.digest }}
+
+  attest-sbom:
+    runs-on: ubuntu-latest
+    needs: [build-and-push, sign-image]
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - name: Download SBOM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sbom
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Attest SBOM to the image
+        run: |
+          cosign attest --yes \
+            --predicate sbom.cyclonedx.json \
+            --type cyclonedx \
+            ${{ needs.build-and-push.outputs.image }}@${{ needs.build-and-push.outputs.digest }}
+
+  verify-signature:
+    runs-on: ubuntu-latest
+    needs: [build-and-push, sign-image]
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+      - name: Verify the image signature (Gate CD)
+        run: |
+          cosign verify \
+            --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
+            --certificate-identity-regexp="https://github.com/${{ github.repository }}/.github/workflows/.*" \
+            ${{ needs.build-and-push.outputs.image }}@${{ needs.build-and-push.outputs.digest }}
