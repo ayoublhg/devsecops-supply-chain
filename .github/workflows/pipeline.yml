@@ -126,6 +126,17 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@v4
+
+      - name: Debug — list remaining CVEs in table format
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ needs.build-and-push.outputs.image }}@${{ needs.build-and-push.outputs.digest }}
+          format: 'table'
+          severity: 'CRITICAL'
+          exit-code: '0'
+          ignore-unfixed: true
+          trivyignores: '.trivyignore'
+
       - name: Run Trivy image scan (Gate 3)
         uses: aquasecurity/trivy-action@master
         with:
@@ -136,6 +147,7 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
           trivyignores: '.trivyignore'
+
       - name: Upload Trivy image SARIF
         if: always()
         continue-on-error: true
