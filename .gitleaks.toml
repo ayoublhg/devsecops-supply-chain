@@ -1,0 +1,17 @@
+
+# Configuration de Gitleaks
+title = "Gitleaks configuration for DevSecOps Supply Chain Project"
+
+[extend]
+# Use the default Gitleaks rules
+useDefault = true
+
+[allowlist]
+description = "Global allowlist"
+# Ignore specific paths where fake secrets are used for testing or documentation
+paths = [
+  '''docs/scenario-attaque.md''',
+  '''docs/rapport-technique.md''',
+  '''JOURNAL.md''',
+  '''security/secrets/fake-secret.js'''
+]
