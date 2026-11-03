@@ -1,227 +1,99 @@
-# Rapport Technique : Pipeline DevSecOps et Sécurité de la Chaîne d'Approvisionnement Logicielle
 
-**Auteur :** Ayoub Lahouegue / Eyet Allah Ben Othman
-**Niveau :** 5ème année — Master/Ingénieur Cybersécurité
-**Projet :** Pipeline DevSecOps Complet avec Software Supply Chain Security
+<div style="text-align: center; margin-top: 100px;">
+  <h1>Rapport Technique</h1>
+  <h2>Pipeline DevSecOps et Sécurité de la Chaîne d'Approvisionnement Logicielle</h2>
+  <br><br><br><br>
+  <p><strong>Auteur :</strong> Ayoub Lahouegue</p>
+  <p><strong>Formation :</strong> 5ème année — Master/Ingénieur Cybersécurité</p>
+  <p><strong>Projet :</strong> Projet Individuel (8 semaines)</p>
+  <p><strong>Date :</strong> Novembre 2026</p>
+</div>
+<div style="page-break-after: always;"></div>
 
----
-
-## 1. Introduction et Contexte
-
-La sécurisation de la chaîne d'approvisionnement logicielle (Software Supply Chain Security) est devenue un enjeu critique. Les récentes attaques (SolarWinds, Log4Shell, xz-utils/CVE-2024-3094) ont démontré que compromettre une dépendance ou un outil de build permet de toucher des milliers d'organisations simultanément. 
-
-Ce projet vise à concevoir, implémenter et démontrer un pipeline CI/CD intégrant les meilleures pratiques de sécurité "Shift-Left" et "Fail-Closed" pour garantir l'intégrité et la provenance des artefacts logiciels.
-
-## 2. Objectifs du Projet
-
-Le pipeline développé répond aux objectifs suivants :
-1. **Détection automatique** des vulnérabilités (code, dépendances, secrets) avant le déploiement.
-2. **Génération de SBOM** (Software Bill of Materials) pour la transparence.
-3. **Signature cryptographique** des artefacts (Cosign) et vérification de provenance (Attestation).
-4. **Contrôle d'admission** au niveau du cluster Kubernetes (rejet des images non signées).
-5. **Preuve par l'échec** : démontrer que chaque sécurité bloque effectivement une attaque simulée.
-
-## 3. Architecture Technique
-
-Le pipeline repose sur un couplage entre GitHub Actions (CI/CD) et un cluster Kubernetes local (Kind) pour l'exécution.
-
-### 3.1 Vue d'ensemble
-*(Insérer ici le schéma de l'architecture, voir le README.md)*
-
-### 3.2 Choix de la Stack
-- **CI/CD :** GitHub Actions (gratuit, intégration OIDC native pour Sigstore).
-- **Application cible :** OWASP Juice Shop (image vulnérable par design).
-- **Orchestration :** Kind (Kubernetes in Docker) + Calico pour l'application réelle des NetworkPolicies.
-- **Admission Controller :** Kyverno (v1.19) pour sa syntaxe YAML native et son support natif de Cosign.
-
-## 4. Justification des Choix d'Outils
-
-*(Se référer aux tableaux détaillés dans `docs/comparatif-outils.md`)*
-
-- **SAST :** Semgrep a été préféré à SonarQube pour sa légèreté en CI/CD et sa capacité à exécuter des règles custom (mode *taint*) sans serveur dédié.
-- **SCA & Image Scan :** Trivy a été retenu face à OWASP Dependency-Check pour sa rapidité et sa capacité à scanner à la fois le code (filesystem) et l'image conteneurisée.
-- **SBOM :** Syft a été choisi pour sa capacité à extraire le SBOM directement de l'image Docker (CycloneDX).
-- **Signature :** Cosign en mode *Keyless* (Sigstore) élimine le problème de gestion des clés privées en s'appuyant sur l'identité OIDC de GitHub Actions.
-- **Admission :** Kyverno a été préféré à OPA Gatekeeper car il permet de vérifier les signatures Cosign en quelques lignes de YAML, sans apprendre le langage Rego.
-
-## 5. Description Détaillée du Pipeline
-
-Le pipeline `pipeline.yml` se compose de 8 jobs :
-1. **`build-and-push` :** Build de l'image et génération du SBOM avec Syft (2744 composants détectés).
-2. **`sast-scan` :** Analyse du code source avec Semgrep (règle custom SQLi + packs OWASP).
-3. **`sca-scan` :** Analyse des dépendances (fs) avec Trivy (bloque si CVE CRITICAL/HIGH).
-4. **`secret-scan` :** Recherche de secrets avec Gitleaks.
-5. **`image-scan` :** Scan de l'image conteneur avec Trivy (Gate 3).
-6. **`sign-image` :** Signature de l'image par *digest* avec Cosign (Keyless).
-7. **`attest-sbom` :** Attachement cryptographique du SBOM à l'image (CycloneDX).
-8. **`verify-signature` :** Vérification de la signature (Gate CD). Si l'image n'est pas signée par notre workflow, le job échoue.
-
-## 6. Scénarios de Test et Preuve par l'Échec
-
-Conformément aux exigences, chaque sécurité a été testée avec une injection volontaire.
-
-### 6.1 Vulnérabilité de code (SAST)
-- **Test :** Injection d'un fichier `test-sqli.js` contenant une concaténation SQL vulnérable.
-- **Résultat :** Le job `sast-scan` échoue avec 1 finding (règle custom `custom-sqli.yaml`).
-- **Preuve :** *(Insérer Screenshot `demo/screenshots/sast-blocked.png`)*
-
-### 6.2 Dépendance vulnérable (SCA)
-- **Test :** Ajout de `lodash@4.17.11` et `minimist@1.2.0` avec lockfile.
-- **Résultat :** Le job `sca-scan` échoue avec 5 CVE détectées.
-- **Preuve :** *(Insérer Screenshot `demo/screenshots/sca-blocked.png`)*
-
-### 6.3 Secret en clair
-- **Test :** Commit d'une fausse clé AWS.
-- **Résultat :** Le job `secret-scan` échoue (2 findings).
-- **Preuve :** *(Insérer Screenshot `demo/screenshots/secret-blocked.png`)*
-
-### 6.4 Contournement du pipeline (Runtime)
-- **Test :** Tentative de déploiement manuel (`kubectl run`) d'une image non signée portant le nom de notre registre.
-- **Résultat :** Kyverno rejette le pod immédiatement (`no signatures found`).
-- **Preuve :** *(Insérer Screenshot `demo/screenshots/kyverno-rejected-unsigned.png`)*
-
-## 7. Résultats et Métriques
-
-*(Se référer au fichier `docs/metriques.md`)*
-
-- **Taux de détection :** 7/7 = 100%.
-- **Temps de build complet :** ~1m15s (contre 27s sans sécurité).
-- **Taille du SBOM :** 2744 composants.
-- **Validation cryptographique :** Le `cosign verify-attestation` confirme que l'image a été signée par `https://github.com/ayoublhg/devsecops-supply-chain/.github/workflows/pipeline.yml@refs/heads/main`.
-
-## 8. Analyse Critique et Limites
-
-1. **Dépendance aux lockfiles :** Trivy fs nécessite un `package-lock.json`. Un simple `package.json` est ignoré (faux négatif identifié et documenté durant le projet).
-2. **CVE de l'image de base :** L'image Juice Shop contient des CVE critiques non patchables. Nous avons dû utiliser un `.trivyignore` justifié pour maintenir le gate actif sans bloquer le projet.
-3. **GitHub Push Protection :** A bloqué nos tests de secrets (clé Stripe), prouvant l'importance des défenses en profondeur (Server-side + CI).
-4. **Dépréciation Kyverno :** L'API `ClusterPolicy` est dépréciée au profit des `ImageValidatingPolicy` (CEL). Une migration est à prévoir.
-5. **Limites de l'environnement :** L'utilisation d'un cluster local (Kind) avec Calico consomme beaucoup de RAM (limité sur un laptop).
-
-## 9. Comparaison avec les Solutions Commerciales
-
-| Fonctionnalité | Notre Pipeline (Open Source) | Snyk / JFrog Xray | Chainguard |
-|---|---|---|---|
-| **SAST/SCA** | Semgrep + Trivy | Base de données de vulnérabilités propriétaire, plus précise | N/A |
-| **Signature** | Cosign (Keyless) | Intégré | N/A |
-| **Images de base** | OWASP Juice Shop (Debian standard) | N/A | Images "Zero-CVE" (distroless) |
-| **Coût** | 100% Gratuit | Très cher (licence par développeur) | Payant par image |
-
-*Conclusion :* Les solutions commerciales offrent une meilleure base de données (moins de faux positifs) et Chainguard résout le problème des CVE de l'image de base. Cependant, notre pipeline prouve qu'une architecture robuste (SLSA, Sigstore) est réalisable uniquement avec des outils OSS.
-
-## 10. Conclusion
-
-Le pipeline développé démontre qu'il est possible de sécuriser une chaîne d'approvisionnement logicielle de bout en bout avec des outils open source. En bloquant les vulnérabilités dès le commit (Shift-Left) et en garantissant la provenance des artefacts lors du déploiement (Runtime Admission), nous avons mis en place un système "Fail-Closed" où aucune image non conforme ne peut atteindre le cluster.
-EOF~
-[200~# Rapport Technique : Pipeline DevSecOps et Sécurité de la Chaîne d'Approvisionnement Logicielle
-
-**Auteur :** Ayoub Lahouegue
-**Niveau :** 5ème année — Master/Ingénieur Cybersécurité
-**Projet :** Pipeline DevSecOps Complet avec Software Supply Chain Security
-
----
+## Table des matières
+1. [Introduction et Contexte](#1-introduction-et-contexte)
+2. [Architecture et Choix Techniques](#2-architecture-et-choix-techniques)
+3. [Implémentation et Tests (Preuve par l'Échec)](#3-implémentation-et-tests)
+4. [Métriques et Résultats](#4-métriques-et-résultats)
+5. [Analyse Critique et Limites](#5-analyse-critique-et-limites)
+6. [Conclusion](#6-conclusion)
+<div style="page-break-after: always;"></div>
 
 ## 1. Introduction et Contexte
 
-La sécurisation de la chaîne d'approvisionnement logicielle (Software Supply Chain Security) est devenue un enjeu critique. Les récentes attaques (SolarWinds, Log4Shell, xz-utils/CVE-2024-3094) ont démontré que compromettre une dépendance ou un outil de build permet de toucher des milliers d'organisations simultanément. 
+La sécurisation de la chaîne d'approvisionnement logicielle (Software Supply Chain) est devenue un enjeu critique de la cybersécurité. Les incidents majeurs récents (SolarWinds, Log4Shell, xz-utils/CVE-2024-3094) ont prouvé qu'une compromission au niveau du code source, d'une dépendance ou d'un outil de build peut avoir des répercussions mondiales. 
 
-Ce projet vise à concevoir, implémenter et démontrer un pipeline CI/CD intégrant les meilleures pratiques de sécurité "Shift-Left" et "Fail-Closed" pour garantir l'intégrité et la provenance des artefacts logiciels.
+L'objectif de ce projet est de concevoir un pipeline CI/CD **"Fail-Closed"** intégrant les pratiques DevSecOps modernes : Shift-Left (détection précoce), transparence (SBOM), intégrité cryptographique (signature keyless) et contrôle d'admission (Runtime). Le projet vise à démontrer, par la preuve, que chaque étape bloque les artefacts non conformes.
 
-## 2. Objectifs du Projet
+## 2. Architecture et Choix Techniques
 
-Le pipeline développé répond aux objectifs suivants :
-1. **Détection automatique** des vulnérabilités (code, dépendances, secrets) avant le déploiement.
-2. **Génération de SBOM** (Software Bill of Materials) pour la transparence.
-3. **Signature cryptographique** des artefacts (Cosign) et vérification de provenance (Attestation).
-4. **Contrôle d'admission** au niveau du cluster Kubernetes (rejet des images non signées).
-5. **Preuve par l'échec** : démontrer que chaque sécurité bloque effectivement une attaque simulée.
+Le pipeline repose sur **GitHub Actions** pour l'intégration continue et **Kind** (Kubernetes in Docker) pour l'exécution locale. 
 
-## 3. Architecture Technique
+### 2.1 La Stack Technique
+*   **CI/CD :** GitHub Actions (gratuit, intégration native OIDC pour Sigstore).
+*   **SAST :** Semgrep (rapide, permet l'écriture de règles personnalisées en mode *taint*).
+*   **SCA :** Trivy (scan du système de fichiers et des images conteneurs).
+*   **SBOM :** Syft (génération au format CycloneDX).
+*   **Signature :** Cosign en mode *Keyless* (Sigstore). Cela élimine la gestion manuelle des clés privées.
+*   **Runtime :** Calico (CNI pour les NetworkPolicies) et Kyverno (Admission Controller pour bloquer les images non signées).
 
-Le pipeline repose sur un couplage entre GitHub Actions (CI/CD) et un cluster Kubernetes local (Kind) pour l'exécution.
+### 2.2 Les 8 Jobs du Pipeline
+1. **Build & Push :** Construction de l'image et push vers GHCR.
+2. **SAST (Gate 1) :** Bloque si une vulnérabilité critique est détectée dans le code.
+3. **SCA (Gate 2) :** Bloque si une dépendance vulnérable est détectée.
+4. **Secrets :** Détecte les clés API committées (via Gitleaks).
+5. **Image Scan (Gate 3) :** Bloque si l'image contient des CVE critiques (via Trivy).
+6. **Sign Image :** Signature de l'image par *digest* avec Cosign Keyless.
+7. **Attest SBOM :** Attache le SBOM cryptographiquement à l'image signée.
+8. **Verify Signature (Gate CD) :** Rejette le déploiement si la signature est absente ou invalide.
 
-### 3.1 Vue d'ensemble
-*(Insérer ici le schéma de l'architecture, voir le README.md)*
+<div style="page-break-after: always;"></div>
 
-### 3.2 Choix de la Stack
-- **CI/CD :** GitHub Actions (gratuit, intégration OIDC native pour Sigstore).
-- **Application cible :** OWASP Juice Shop (image vulnérable par design).
-- **Orchestration :** Kind (Kubernetes in Docker) + Calico pour l'application réelle des NetworkPolicies.
-- **Admission Controller :** Kyverno (v1.19) pour sa syntaxe YAML native et son support natif de Cosign.
+## 3. Implémentation et Tests
 
-## 4. Justification des Choix d'Outils
+Le projet exigeait une preuve par l'échec contrôlé (§6.1). Voici les captures d'écran démontrant l'efficacité de chaque barrière de sécurité.
 
-*(Se référer aux tableaux détaillés dans `docs/comparatif-outils.md`)*
+### 3.1 Test 1 : SAST (SQL Injection)
+Nous avons injecté une requête SQL vulnérable (`"SELECT * FROM users WHERE id = " + req.query.id`) dans le code.
+Le pipeline a échoué au job `sast-scan` grâce à notre règle personnalisée Semgrep (`custom-sqli.yaml`).
 
-- **SAST :** Semgrep a été préféré à SonarQube pour sa légèreté en CI/CD et sa capacité à exécuter des règles custom (mode *taint*) sans serveur dédié.
-- **SCA & Image Scan :** Trivy a été retenu face à OWASP Dependency-Check pour sa rapidité et sa capacité à scanner à la fois le code (filesystem) et l'image conteneurisée.
-- **SBOM :** Syft a été choisi pour sa capacité à extraire le SBOM directement de l'image Docker (CycloneDX).
-- **Signature :** Cosign en mode *Keyless* (Sigstore) élimine le problème de gestion des clés privées en s'appuyant sur l'identité OIDC de GitHub Actions.
-- **Admission :** Kyverno a été préféré à OPA Gatekeeper car il permet de vérifier les signatures Cosign en quelques lignes de YAML, sans apprendre le langage Rego.
+![Preuve d'échec SAST](../demo/screenshots/sast-blocked.png)
 
-## 5. Description Détaillée du Pipeline
+### 3.2 Test 2 : SCA (Dépendance Vulnérable)
+Nous avons ajouté les bibliothèques `lodash@4.17.11` et `minimist@1.2.0` (connues pour avoir des CVE critiques) accompagnées de leur `package-lock.json`.
+Le pipeline a échoué au job `sca-scan` avec la détection de 5 CVE.
 
-Le pipeline `pipeline.yml` se compose de 8 jobs :
-1. **`build-and-push` :** Build de l'image et génération du SBOM avec Syft (2744 composants détectés).
-2. **`sast-scan` :** Analyse du code source avec Semgrep (règle custom SQLi + packs OWASP).
-3. **`sca-scan` :** Analyse des dépendances (fs) avec Trivy (bloque si CVE CRITICAL/HIGH).
-4. **`secret-scan` :** Recherche de secrets avec Gitleaks.
-5. **`image-scan` :** Scan de l'image conteneur avec Trivy (Gate 3).
-6. **`sign-image` :** Signature de l'image par *digest* avec Cosign (Keyless).
-7. **`attest-sbom` :** Attachement cryptographique du SBOM à l'image (CycloneDX).
-8. **`verify-signature` :** Vérification de la signature (Gate CD). Si l'image n'est pas signée par notre workflow, le job échoue.
+![Preuve d'échec SCA](../demo/screenshots/sca-blocked.png)
 
-## 6. Scénarios de Test et Preuve par l'Échec
+### 3.3 Test 3 : Détection de Secrets
+Nous avons committé une fausse clé AWS. GitHub Push Protection a bloqué le push initial. Après avoir contourné cela avec une clé non-allowlistée, le pipeline a échoué au job `secret-scan` (Gitleaks).
 
-Conformément aux exigences, chaque sécurité a été testée avec une injection volontaire.
+![Preuve d'échec Secret](../demo/screenshots/secret-blocked.png)
 
-### 6.1 Vulnérabilité de code (SAST)
-- **Test :** Injection d'un fichier `test-sqli.js` contenant une concaténation SQL vulnérable.
-- **Résultat :** Le job `sast-scan` échoue avec 1 finding (règle custom `custom-sqli.yaml`).
-- **Preuve :** *(Insérer Screenshot `demo/screenshots/sast-blocked.png`)*
+### 3.4 Test 4 : Contournement du Pipeline (Runtime)
+Même si le pipeline bloque les erreurs, nous avons simulé un attaquant contournant la CI/CD en tentant un `kubectl run` manuel avec une image non signée.
+L'Admission Controller (Kyverno) a rejeté le pod immédiatement car aucune signature valide n'a été trouvée.
 
-### 6.2 Dépendance vulnérable (SCA)
-- **Test :** Ajout de `lodash@4.17.11` et `minimist@1.2.0` avec lockfile.
-- **Résultat :** Le job `sca-scan` échoue avec 5 CVE détectées.
-- **Preuve :** *(Insérer Screenshot `demo/screenshots/sca-blocked.png`)*
+![Preuve de rejet Kyverno](../demo/screenshots/kyverno-rejected-unsigned.png)
 
-### 6.3 Secret en clair
-- **Test :** Commit d'une fausse clé AWS.
-- **Résultat :** Le job `secret-scan` échoue (2 findings).
-- **Preuve :** *(Insérer Screenshot `demo/screenshots/secret-blocked.png`)*
+<div style="page-break-after: always;"></div>
 
-### 6.4 Contournement du pipeline (Runtime)
-- **Test :** Tentative de déploiement manuel (`kubectl run`) d'une image non signée portant le nom de notre registre.
-- **Résultat :** Kyverno rejette le pod immédiatement (`no signatures found`).
-- **Preuve :** *(Insérer Screenshot `demo/screenshots/kyverno-rejected-unsigned.png`)*
+## 4. Métriques et Résultats
 
-## 7. Résultats et Métriques
+*(Données extraites de docs/metriques.md)*
 
-*(Se référer au fichier `docs/metriques.md`)*
+*   **Taux de détection (Preuve par l'échec) :** 7/7 attaques simulées ont été bloquées (100%).
+*   **Temps de build :** Le pipeline complet (8 jobs en parallèle) prend en moyenne **1 minute et 15 secondes**.
+*   **SBOM :** L'outil Syft a recensé **2744 composants** dans l'image de base.
+*   **Validation cryptographique :** L'attestation a été vérifiée via `cosign verify-attestation` avec succès, prouvant que l'image provient bien de notre workflow GitHub.
 
-- **Taux de détection :** 7/7 = 100%.
-- **Temps de build complet :** ~1m15s (contre 27s sans sécurité).
-- **Taille du SBOM :** 2744 composants.
-- **Validation cryptographique :** Le `cosign verify-attestation` confirme que l'image a été signée par `https://github.com/ayoublhg/devsecops-supply-chain/.github/workflows/pipeline.yml@refs/heads/main`.
+## 5. Analyse Critique et Limites
 
-## 8. Analyse Critique et Limites
+1.  **Gestion des CVE de l'image de base :** L'image *OWASP Juice Shop* contient des CVE critiques non patchables. Nous avons dû utiliser un fichier `.trivyignore` justifié pour maintenir le pipeline fonctionnel. La solution industrielle serait d'utiliser des images "Distroless" (ex: Chainguard).
+2.  **Faux négatifs SCA :** Trivy (en mode `fs`) ignore un `package.json` s'il n'y a pas de `package-lock.json`. Nous avons identifié et corrigé ce problème durant le projet.
+3.  **SLSA et Provenance :** Nous avons utilisé Cosign Attest pour lier le SBOM à l'image. L'intégration complète du framework SLSA (niveau 3) via `slsa-github-generator` n'a pas été implémentée, mais représente l'étape suivante logique.
+4.  **Dépréciation Kyverno :** L'API `ClusterPolicy` (kyverno.io/v1) est dépréciée au profit de `ImageValidatingPolicy` (CEL). La migration est à prévoir.
 
-1. **Dépendance aux lockfiles :** Trivy fs nécessite un `package-lock.json`. Un simple `package.json` est ignoré (faux négatif identifié et documenté durant le projet).
-2. **CVE de l'image de base :** L'image Juice Shop contient des CVE critiques non patchables. Nous avons dû utiliser un `.trivyignore` justifié pour maintenir le gate actif sans bloquer le projet.
-3. **GitHub Push Protection :** A bloqué nos tests de secrets (clé Stripe), prouvant l'importance des défenses en profondeur (Server-side + CI).
-4. **Dépréciation Kyverno :** L'API `ClusterPolicy` est dépréciée au profit des `ImageValidatingPolicy` (CEL). Une migration est à prévoir.
-5. **Limites de l'environnement :** L'utilisation d'un cluster local (Kind) avec Calico consomme beaucoup de RAM (limité sur un laptop).
+## 6. Conclusion
 
-## 9. Comparaison avec les Solutions Commerciales
-
-| Fonctionnalité | Notre Pipeline (Open Source) | Snyk / JFrog Xray | Chainguard |
-|---|---|---|---|
-| **SAST/SCA** | Semgrep + Trivy | Base de données de vulnérabilités propriétaire, plus précise | N/A |
-| **Signature** | Cosign (Keyless) | Intégré | N/A |
-| **Images de base** | OWASP Juice Shop (Debian standard) | N/A | Images "Zero-CVE" (distroless) |
-| **Coût** | 100% Gratuit | Très cher (licence par développeur) | Payant par image |
-
-*Conclusion :* Les solutions commerciales offrent une meilleure base de données (moins de faux positifs) et Chainguard résout le problème des CVE de l'image de base. Cependant, notre pipeline prouve qu'une architecture robuste (SLSA, Sigstore) est réalisable uniquement avec des outils OSS.
-
-## 10. Conclusion
-
-Le pipeline développé démontre qu'il est possible de sécuriser une chaîne d'approvisionnement logicielle de bout en bout avec des outils open source. En bloquant les vulnérabilités dès le commit (Shift-Left) et en garantissant la provenance des artefacts lors du déploiement (Runtime Admission), nous avons mis en place un système "Fail-Closed" où aucune image non conforme ne peut atteindre le cluster.
+Ce projet démontre qu'il est possible de sécuriser une chaîne d'approvisionnement logicielle de bout en bout en utilisant exclusivement des outils open source. En bloquant les vulnérabilités dès le commit et en garantissant la provenance des artefacts lors du déploiement, nous avons mis en place un système complet où aucune image non conforme ne peut atteindre le cluster. Ce pipeline est directement transposable à un environnement de production d'entreprise.
