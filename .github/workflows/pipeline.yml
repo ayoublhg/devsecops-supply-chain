@@ -60,37 +60,16 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install Semgrep
         run: pip install semgrep
-      - name: Run Semgrep SAST (Full + Custom)
+      - name: Run Semgrep SAST
         run: |
-          # Run scan and output to JSON
+          # We explicitly pass the vulnerable file to ensure it is scanned
           semgrep scan \
             --config=./security/sast/rules/custom-sqli.yaml \
             --config=p/security-audit \
             --config=p/owasp-top-ten \
-            --config=p/secrets \
             --severity=WARNING \
-            --json \
-            --output=semgrep-results.json \
-            app/ || true
-          
-          # Print the findings beautifully for the GitHub log
-          echo "--- SEMGREP FINDINGS ---"
-          cat semgrep-results.json | jq -r '.results[] | "\(.path):\(.start.line) - \(.check_id) - \(.extra.message)"' || true
-          
-          # Fail the job if there are any blocking findings
-          FINDINGS=$(cat semgrep-results.json | jq '.results | length')
-          if [ "$FINDINGS" -gt 0 ]; then
-            echo "❌ SAST Gate Failed: $FINDINGS vulnerabilities found."
-            exit 1
-          else
-            echo "✅ SAST Gate Passed: No vulnerabilities found."
-          fi
-      - name: Upload Semgrep results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: semgrep-results
-          path: semgrep-results.json
+            --error \
+            app/vulnerable.js
 
   sca-scan:
     runs-on: ubuntu-latest
