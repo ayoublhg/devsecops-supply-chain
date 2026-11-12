@@ -59,13 +59,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
+      - name: DEBUG - Prove the file exists in CI
+        run: |
+          echo "=== FILES IN APP ==="
+          ls -la app/
+          echo "=== CONTENTS OF VULNERABLE.JS ==="
+          cat app/vulnerable.js
+          
       - name: Install Semgrep
         run: pip install semgrep
         
-      - name: Run Semgrep SAST (Full + Custom)
-        # This is the key part: we give Semgrep more time to download registry rules
-        env:
-          SEMGREP_TIMEOUT: "600"  # 10 minutes timeout for the entire job
+      - name: Run Semgrep SAST (Full Registry + Custom)
         run: |
           semgrep scan \
             --config=./security/sast/rules/custom-sqli.yaml \
