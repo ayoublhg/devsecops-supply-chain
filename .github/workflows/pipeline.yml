@@ -58,28 +58,19 @@ jobs:
     needs: build-and-push
     steps:
       - uses: actions/checkout@v4
-      
-      - name: DEBUG - Show files in app folder
-        run: |
-          echo "Current directory: $(pwd)"
-          ls -la app/
-          
-      - name: DEBUG - Show contents of vulnerable.js
-        run: |
-          cat app/vulnerable.js
-          
       - name: Install Semgrep
         run: pip install semgrep
-        
       - name: Run Semgrep SAST
         run: |
-          # Using --verbose to see what files Semgrep is scanning
+          # This scans the ENTIRE app directory (not a single file)
           semgrep scan \
             --config=./security/sast/rules/custom-sqli.yaml \
-            --severity=ERROR \
+            --config=p/security-audit \
+            --config=p/owasp-top-ten \
+            --config=p/secrets \
+            --severity=WARNING \
             --error \
-            --verbose \
-            app/vulnerable.js
+            app/
 
   sca-scan:
     runs-on: ubuntu-latest
