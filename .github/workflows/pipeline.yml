@@ -67,11 +67,8 @@ jobs:
             --config=p/security-audit \
             --config=p/owasp-top-ten \
             --config=p/secrets \
-            --severity=WARNING \
             --error \
-            --json \
-            --output=semgrep-results.json \
-            ./app
+            /app
       - name: Upload Semgrep results
         if: always()
         uses: actions/upload-artifact@v4
