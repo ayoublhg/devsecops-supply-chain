@@ -1,6 +1,7 @@
 rules:
   - id: custom-sql-injection
-    languages: [javascript]
-    message: "SQL Injection vulnerability: raw user input detected."
+    languages: [javascript, typescript]
+    message: "SQL Injection vulnerability: user input concatenated into a SQL query."
     severity: ERROR
-    pattern: $REQ.query
+    # Basic regex: looks for SELECT, then anything, then req.query
+    pattern-regex: "SELECT.*req\\.query"
