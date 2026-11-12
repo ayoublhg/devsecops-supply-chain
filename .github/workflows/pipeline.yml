@@ -58,11 +58,15 @@ jobs:
     needs: build-and-push
     steps:
       - uses: actions/checkout@v4
+      
       - name: Install Semgrep
         run: pip install semgrep
-      - name: Run Semgrep SAST
+        
+      - name: Run Semgrep SAST (Full + Custom)
+        # This is the key part: we give Semgrep more time to download registry rules
+        env:
+          SEMGREP_TIMEOUT: "600"  # 10 minutes timeout for the entire job
         run: |
-          # This scans the ENTIRE app directory (not a single file)
           semgrep scan \
             --config=./security/sast/rules/custom-sqli.yaml \
             --config=p/security-audit \
@@ -70,7 +74,8 @@ jobs:
             --config=p/secrets \
             --severity=WARNING \
             --error \
-            app/
+            --verbose \
+            ./app
 
   sca-scan:
     runs-on: ubuntu-latest
