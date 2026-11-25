@@ -1,10 +1,8 @@
 name: Security Remediation Report
 
 on:
-  # This temporary push trigger forces GitHub to register the workflow immediately
   push:
     branches: [main]
-  # This is the real trigger that waits for the main pipeline to finish
   workflow_run:
     workflows: ["DevSecOps Supply Chain Pipeline"] 
     types:
@@ -13,7 +11,6 @@ on:
 jobs:
   generate-report:
     runs-on: ubuntu-latest
-    # It skips on a standard push, but runs when the main pipeline fails
     if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure' }}
     steps:
       - name: Download Scan Results
@@ -23,30 +20,75 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: scan-results
 
-      - name: Generate Markdown Remediation Report
+      - name: Generate Professional HTML Report
         run: |
-          echo "# Security Remediation Report" > report.md
-          echo "The pipeline was blocked. Please read the remediation advice below." >> report.md
-          echo "" >> report.md
+          cat > report.html <<EOF
+          <html>
+          <head>
+          <style>
+            body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #333; margin: 40px; }
+            h1 { color: #d32f2f; border-bottom: 2px solid #d32f2f; padding-bottom: 10px; }
+            .header-info { background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin-bottom: 30px; }
+            .header-info p { margin: 5px 0; font-size: 14px; }
+            h2 { color: #1976d2; margin-top: 40px; border-bottom: 1px solid #ddd; padding-bottom: 5px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 13px; }
+            th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+            th { background-color: #1976d2; color: white; font-weight: bold; }
+            tr:nth-child(even) { background-color: #f9f9f9; }
+            .remediation-box { background-color: #e8f5e9; border-left: 5px solid #4caf50; padding: 15px; margin: 15px 0; font-size: 14px; }
+            .empty { color: #4caf50; font-weight: bold; }
+          </style>
+          </head>
+          <body>
+            <h1>🚨 Security Remediation Report</h1>
+            <div class="header-info">
+              <p><strong>Repository:</strong> ${{ github.event.workflow_run.repository.full_name }}</p>
+              <p><strong>Branch:</strong> ${{ github.event.workflow_run.head_branch }}</p>
+              <p><strong>Commit:</strong> ${{ github.event.workflow_run.head_sha }}</p>
+              <p><strong>Status:</strong> <span style="color: #d32f2f; font-weight: bold;">Pipeline Blocked</span></p>
+            </div>
+          EOF
+
+          # 1. Parse Semgrep Results
+          echo "<h2>1. SAST Vulnerabilities (Semgrep)</h2>" >> report.html
+          echo "<div class='remediation-box'><strong>How to fix:</strong> Review the flagged code below. For SQL injection, replace string concatenation with parameterized queries.</div>" >> report.html
           
           if [ -f "scan-results/semgrep-results/semgrep-results.json" ]; then
-            echo "## 1. SAST Vulnerabilities (Semgrep)" >> report.md
-            echo "**Remediation:** Review the flagged code. For SQL injection, use parameterized queries." >> report.md
-            echo '```json' >> report.md
-            cat scan-results/semgrep-results/semgrep-results.json | jq '.results[] | {Rule: .check_id, File: .path, Message: .extra.message}' >> report.md
-            echo '```' >> report.md
+            SEMGREP_COUNT=$(jq '.results | length' scan-results/semgrep-results/semgrep-results.json)
+            if [ "$SEMGREP_COUNT" -gt 0 ]; then
+              echo "<table><tr><th>Rule ID</th><th>File</th><th>Line</th><th>Message</th></tr>" >> report.html
+              jq -r '.results[] | "<tr><td>\(.check_id)</td><td>\(.path)</td><td>\(.start.line)</td><td>\(.extra.message)</td></tr>"' scan-results/semgrep-results/semgrep-results.json >> report.html
+              echo "</table>" >> report.html
+            else
+              echo "<p class='empty'>✅ No SAST vulnerabilities found.</p>" >> report.html
+            fi
+          else
+             echo "<p>No Semgrep data found.</p>" >> report.html
           fi
 
+          # 2. Parse Trivy Results (SARIF format)
+          echo "<h2>2. Dependency Vulnerabilities (Trivy)</h2>" >> report.html
+          echo "<div class='remediation-box'><strong>How to fix:</strong> Update the affected packages to their latest secure versions by running <code>npm update</code> or updating your lockfile.</div>" >> report.html
+          
           if [ -f "scan-results/trivy-results/trivy-sca-results.sarif" ]; then
-            echo "## 2. Dependency Vulnerabilities (Trivy)" >> report.md
-            echo "**Remediation:** Update the affected packages to their latest secure versions (e.g., run `npm update`)." >> report.md
-            echo "See the attached SARIF file in the artifacts for the full list of CVEs." >> report.md
+            TRIVY_COUNT=$(jq '.runs[0].results | length' scan-results/trivy-results/trivy-sca-results.sarif)
+            if [ "$TRIVY_COUNT" -gt 0 ]; then
+              echo "<table><tr><th>Vulnerability ID</th><th>Package</th><th>Message</th></tr>" >> report.html
+              jq -r '.runs[0].results[] | "<tr><td>\(.ruleId)</td><td>\(.locations[0].physicalLocation.artifactLocation.uri)</td><td>\(.message.text)</td></tr>"' scan-results/trivy-results/trivy-sca-results.sarif >> report.html
+              echo "</table>" >> report.html
+            else
+              echo "<p class='empty'>✅ No dependency vulnerabilities found.</p>" >> report.html
+            fi
+          else
+             echo "<p>No Trivy data found.</p>" >> report.html
           fi
+
+          echo "</body></html>" >> report.html
 
       - name: Convert to PDF
         run: |
-          sudo apt-get update && sudo apt-get install -y pandoc weasyprint
-          pandoc report.md -o Security-Remediation-Report.pdf --pdf-engine=weasyprint
+          sudo apt-get update && sudo apt-get install -y weasyprint
+          weasyprint report.html Security-Remediation-Report.pdf
 
       - name: Upload PDF Artifact
         uses: actions/upload-artifact@v4
