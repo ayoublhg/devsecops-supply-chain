@@ -1,0 +1,55 @@
+name: Security Remediation Report
+
+on:
+  # This temporary push trigger forces GitHub to register the workflow immediately
+  push:
+    branches: [main]
+  # This is the real trigger that waits for the main pipeline to finish
+  workflow_run:
+    workflows: ["DevSecOps Supply Chain Pipeline"] 
+    types:
+      - completed
+
+jobs:
+  generate-report:
+    runs-on: ubuntu-latest
+    # It skips on a standard push, but runs when the main pipeline fails
+    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure' }}
+    steps:
+      - name: Download Scan Results
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: scan-results
+
+      - name: Generate Markdown Remediation Report
+        run: |
+          echo "# Security Remediation Report" > report.md
+          echo "The pipeline was blocked. Please read the remediation advice below." >> report.md
+          echo "" >> report.md
+          
+          if [ -f "scan-results/semgrep-results/semgrep-results.json" ]; then
+            echo "## 1. SAST Vulnerabilities (Semgrep)" >> report.md
+            echo "**Remediation:** Review the flagged code. For SQL injection, use parameterized queries." >> report.md
+            echo '```json' >> report.md
+            cat scan-results/semgrep-results/semgrep-results.json | jq '.results[] | {Rule: .check_id, File: .path, Message: .extra.message}' >> report.md
+            echo '```' >> report.md
+          fi
+
+          if [ -f "scan-results/trivy-results/trivy-sca-results.sarif" ]; then
+            echo "## 2. Dependency Vulnerabilities (Trivy)" >> report.md
+            echo "**Remediation:** Update the affected packages to their latest secure versions (e.g., run `npm update`)." >> report.md
+            echo "See the attached SARIF file in the artifacts for the full list of CVEs." >> report.md
+          fi
+
+      - name: Convert to PDF
+        run: |
+          sudo apt-get update && sudo apt-get install -y pandoc texlive-latex-base
+          pandoc report.md -o Security-Remediation-Report.pdf
+
+      - name: Upload PDF Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-remediation-pdf
+          path: Security-Remediation-Report.pdf
