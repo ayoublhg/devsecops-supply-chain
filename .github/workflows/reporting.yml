@@ -45,8 +45,8 @@ jobs:
 
       - name: Convert to PDF
         run: |
-          sudo apt-get update && sudo apt-get install -y pandoc wkhtmltopdf
-          pandoc report.md -o Security-Remediation-Report.pdf -t html5 --pdf-engine=wkhtmltopdf
+          npm install -g md-to-pdf
+          md-to-pdf report.md --output Security-Remediation-Report.pdf
 
       - name: Upload PDF Artifact
         uses: actions/upload-artifact@v4
