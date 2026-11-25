@@ -46,7 +46,8 @@ jobs:
       - name: Convert to PDF
         run: |
           npm install -g md-to-pdf
-          md-to-pdf report.md --output Security-Remediation-Report.pdf
+          md-to-pdf report.md
+          mv report.pdf Security-Remediation-Report.pdf
 
       - name: Upload PDF Artifact
         uses: actions/upload-artifact@v4
